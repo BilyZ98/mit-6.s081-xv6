@@ -1,0 +1,16 @@
+{
+    "files.associations": {
+        "ostream": "cpp",
+        "memlayout.h": "c",
+        "user.h": "c",
+        "types.h": "c",
+        "stat.h": "c",
+        "filesystem": "c",
+        "mutex": "c",
+        "fs.h": "c",
+        "param.h": "c",
+        "istream": "c",
+        "*.tcc": "c",
+        "random": "cpp"
+    }
+}

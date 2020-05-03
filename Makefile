@@ -131,6 +131,7 @@ UPROGS=\
 	$U/_mkdir\
 	$U/_rm\
 	$U/_sh\
+	$U/_sleep\
 	$U/_stressfs\
 	$U/_usertests\
 	$U/_wc\
@@ -143,6 +144,12 @@ UPROGS=\
 	$U/_bcachetest\
 	$U/_alloctest\
 	$U/_bigfile\
+	$U/_pingpong\
+	$U/_primes\
+	$U/_primes2\
+	$U/_find\
+	$U/_xargs\
+	$U/_nsh\
 
 fs.img: mkfs/mkfs README user/xargstest.sh $(UPROGS)
 	mkfs/mkfs fs.img README user/xargstest.sh $(UPROGS)
