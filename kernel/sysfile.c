@@ -16,6 +16,43 @@
 #include "file.h"
 #include "fcntl.h"
 
+int checkpages(pagetable_t pagetable, uint64 va, uint64 sz);
+
+int checkpages(pagetable_t pagetable, uint64 va, uint64 sz){
+  // invalid address 
+  if(va + sz > myproc()->sz) {
+    return -1;
+  }
+  
+  char *mem;
+  uint64 a;
+  va = PGROUNDDOWN(va);
+  a = va;
+  for(; a < va + sz; a +=PGSIZE){
+    uint64 pa = walkaddr(pagetable, a);
+    if( pa != 0){
+      continue;
+    }
+
+    mem = kalloc();
+    if(mem == 0){
+      printf("checkpages: not enough memory\n");
+      myproc()->killed = 1;
+      return -1;
+    }
+
+    if(mappages(pagetable, a, PGSIZE, (uint64)mem, PTE_W|PTE_X|PTE_R|PTE_U) != 0){
+      kfree(mem);
+      myproc()->killed = 1;
+      printf("checkpages: map pages fail \n");
+      return -1;
+    }
+
+  }
+  return 0;
+}
+
+
 // Fetch the nth word-sized system call argument as a file descriptor
 // and return both the descriptor and the corresponding struct file.
 static int
@@ -75,6 +112,9 @@ sys_read(void)
 
   if(argfd(0, 0, &f) < 0 || argint(2, &n) < 0 || argaddr(1, &p) < 0)
     return -1;
+  struct proc *my_proc = myproc();
+  int c = checkpages(my_proc->pagetable, p, n);
+  if(c < 0) return -1;
   return fileread(f, p, n);
 }
 
@@ -88,6 +128,8 @@ sys_write(void)
   if(argfd(0, 0, &f) < 0 || argint(2, &n) < 0 || argaddr(1, &p) < 0)
     return -1;
 
+  int c = checkpages(myproc()->pagetable, p, n);
+  if(c < 0) return -1;
   return filewrite(f, p, n);
 }
 
@@ -472,6 +514,10 @@ sys_pipe(void)
     fileclose(wf);
     return -1;
   }
+  int c = checkpages(p->pagetable, fdarray, 2*sizeof(int));
+  if(c < 0) return -1;
+  //checkpages(p->pagetable, fdarray, sizeof(fd0));
+  //checkpages(p->pagetable, fdarray+sizeof(fd0), sizeof(fd1));
   if(copyout(p->pagetable, fdarray, (char*)&fd0, sizeof(fd0)) < 0 ||
      copyout(p->pagetable, fdarray+sizeof(fd0), (char *)&fd1, sizeof(fd1)) < 0){
     p->ofile[fd0] = 0;

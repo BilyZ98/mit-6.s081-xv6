@@ -43,12 +43,24 @@ sys_sbrk(void)
 {
   int addr;
   int n;
+  int new_addr;
 
   if(argint(0, &n) < 0)
     return -1;
   addr = myproc()->sz;
+  if(n > 0){
+    new_addr = PGROUNDUP(addr + n);
+    if(new_addr < PGSIZE || new_addr >= MAXVA)
+      exit(-1);
+    myproc()->sz = new_addr;
+  } else if(n < 0) {
+    if(growproc(n) < 0)
+      return -1;
+  }
+  /*
   if(growproc(n) < 0)
     return -1;
+    */
   return addr;
 }
 

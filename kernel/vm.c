@@ -15,8 +15,34 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 
 extern char trampoline[]; // trampoline.S
 
-void print(pagetable_t);
+void print(pagetable_t pagetable, int level);
+void vmprint(pagetable_t);
 
+void vmprint(pagetable_t pagetable) {
+  printf("page table %p\n", pagetable);
+
+  print(pagetable, 2);
+}
+
+void print(pagetable_t pagetable, int level) {
+  if(level < 0) return;
+  int entry_num = 512;
+  for(int i=0; i < entry_num; i++){
+    pte_t pte = pagetable[i];
+    if((pte & PTE_V )){
+      uint64 child = PTE2PA(pte);
+    
+      for(int j = 2-level+1; j>0; j--){
+        printf(".. ");
+      }
+      printf("%d: pte %p pa %p\n", i, pte, child);
+
+      print((pagetable_t)child, level-1);      
+
+    }  
+   
+  }
+}
 /*
  * create a direct-map page table for the kernel and
  * turn on paging. called early, in supervisor mode.
@@ -188,18 +214,20 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
   last = PGROUNDDOWN(va + size - 1);
   for(;;){
     if((pte = walk(pagetable, a, 0)) == 0)
-      panic("uvmunmap: walk");
+      //panic("uvmunmap: walk");
+      goto end;
     if((*pte & PTE_V) == 0){
-      printf("va=%p pte=%p\n", a, *pte);
-      panic("uvmunmap: not mapped");
+      //printf("va=%p pte=%p\n", a, *pte);
+      //panic("uvmunmap: not mapped");
     }
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
-    if(do_free){
+    if(do_free && (((*pte) & PTE_V) != 0)){
       pa = PTE2PA(*pte);
       kfree((void*)pa);
     }
     *pte = 0;
+end:
     if(a == last)
       break;
     a += PGSIZE;
@@ -325,10 +353,14 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
-    if((pte = walk(old, i, 0)) == 0)
-      panic("uvmcopy: pte should exist");
-    if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+    if((pte = walk(old, i, 0)) == 0){
+      //panic("uvmcopy: pte should exist");
+      continue;
+    }
+    if((*pte & PTE_V) == 0){
+      //panic("uvmcopy: page not present");
+      continue;
+    }
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
