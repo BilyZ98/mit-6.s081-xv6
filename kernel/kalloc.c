@@ -23,10 +23,19 @@ struct {
   struct run *freelist;
 } kmem;
 
+struct  {
+  char *alloc_base;
+  char *mark_base;
+  struct spinlock lock;
+} refcnt;
+
+void refinc(char *addr);
+
 void
 kinit()
 {
   initlock(&kmem.lock, "kmem");
+  //initlock(&refcnt.lock, "refcnt");
   freerange(end, (void*)PHYSTOP);
 }
 
@@ -35,6 +44,12 @@ freerange(void *pa_start, void *pa_end)
 {
   char *p;
   p = (char*)PGROUNDUP((uint64)pa_start);
+  //acquire(&refcnt.lock);
+  refcnt.mark_base =  p;
+  refcnt.alloc_base = p + 8 * PGSIZE;
+  memset(refcnt.mark_base, 1, 8*PGSIZE);
+  //release(&refcnt.lock);
+  p = refcnt.alloc_base;
   for(; p + PGSIZE <= (char*)pa_end; p += PGSIZE)
     kfree(p);
 }
@@ -50,6 +65,15 @@ kfree(void *pa)
 
   if(((uint64)pa % PGSIZE) != 0 || (char*)pa < end || (uint64)pa >= PHYSTOP)
     panic("kfree");
+
+  acquire(&refcnt.lock);
+  char ref = --refcnt.mark_base[((char*)pa - refcnt.alloc_base) / PGSIZE];
+  if(ref > 0){
+    release(&refcnt.lock);
+    return;
+  }
+  release(&refcnt.lock);
+ 
 
   // Fill with junk to catch dangling refs.
   memset(pa, 1, PGSIZE);
@@ -70,13 +94,29 @@ kalloc(void)
 {
   struct run *r;
 
+
   acquire(&kmem.lock);
   r = kmem.freelist;
   if(r)
     kmem.freelist = r->next;
   release(&kmem.lock);
 
-  if(r)
+  if(r){
     memset((char*)r, 5, PGSIZE); // fill with junk
+    refinc((char*)r);
+  } else {
+    printf("kalloc: invalid addredd\n");
+  }
   return (void*)r;
+}
+
+void refinc(char *addr) {
+  acquire(&refcnt.lock);
+  if(addr < refcnt.alloc_base) 
+    panic("refinc: address invalid");
+  if(refcnt.mark_base[ (addr - refcnt.alloc_base)/PGSIZE] < 0){
+    panic("refinc: ref less than 0");
+  }
+  refcnt.mark_base[(addr - refcnt.alloc_base)/PGSIZE]++;
+  release(&refcnt.lock);
 }

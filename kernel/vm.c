@@ -163,7 +163,7 @@ mappages(pagetable_t pagetable, uint64 va, uint64 size, uint64 pa, int perm)
   for(;;){
     if((pte = walk(pagetable, a, 1)) == 0)
       return -1;
-    if(*pte & PTE_V)
+    if(*pte & PTE_V && ((*pte) & PTE_COW) == 0)
       panic("remap");
     *pte = PA2PTE(pa) | perm | PTE_V;
     if(a == last)
@@ -322,7 +322,8 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
   pte_t *pte;
   uint64 pa, i;
   uint flags;
-  char *mem;
+  //uint flags_w_0_cow_1;
+  //char *mem;
 
   for(i = 0; i < sz; i += PGSIZE){
     if((pte = walk(old, i, 0)) == 0)
@@ -330,12 +331,25 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((*pte & PTE_V) == 0)
       panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
+    //flags = PTE_FLAGS(*pte);
+    //printf("original flags %x\n", flags);
+    //if((mem = kalloc()) == 0)
+    //  goto err;
+    //memmove(mem, (char*)pa, PGSIZE);
+    // set the writable flag to be 0
+    //flags_w_0_cow_1 = ((~PTE_W) & flags)| PTE_COW;
+    //printf("flags is %x\n", flags_w_0_cow_1);
+    // set writable bit of pte of parent ot be 0
+    //*pte = ((*pte) & (~PTE_W)) | PTE_COW;
+    if((*pte & PTE_W) != 0) {
+      *pte ^= PTE_W;
+      *pte |= PTE_COW;
+    }
     flags = PTE_FLAGS(*pte);
-    if((mem = kalloc()) == 0)
-      goto err;
-    memmove(mem, (char*)pa, PGSIZE);
-    if(mappages(new, i, PGSIZE, (uint64)mem, flags) != 0){
-      kfree(mem);
+    refinc((char*)pa);
+    if(mappages(new, i, PGSIZE, (uint64)pa, flags) != 0){
+      //kfree(mem);
+      printf("uvmcopy: mappages failed\n");
       goto err;
     }
   }
@@ -344,6 +358,42 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
  err:
   uvmunmap(new, 0, i, 1);
   return -1;
+}
+
+int uvmcow(pagetable_t pagetable, uint64 va){
+
+    if(va >= MAXVA){
+      printf("usertrap: address invalid\n");
+      return -1;
+    } 
+    va = PGROUNDDOWN(va);
+
+    pte_t *pte = walk(pagetable, va, 0);
+    //pte_t *pte = (pte_t*)PA2PTE(pa);
+    if(pte == 0 || (*pte & PTE_COW) == 0)
+      return -1;
+    uint64 pa = PTE2PA(*pte);
+    char *mem;
+
+    if((mem = kalloc()) == 0) {
+      printf("usertrap: not enought memory\n");
+      return -1;
+    } else {
+      uint flags = PTE_FLAGS(*pte) ^ PTE_COW;
+      flags |= PTE_W;
+      memmove(mem, (char*)pa, PGSIZE);
+      //uvmunmap(p->pagetable, trap_va, PGSIZE, 1);
+      //int flags_w_1_cow_0 = (int)(PTE_W | (~PTE_COW) | PTE); 
+      if(mappages(pagetable, va, PGSIZE, (uint64)mem, flags) != 0) {
+        printf("usertrap: mappages failed\n");
+        return -1;
+      }
+      kfree((char*)pa);
+      return 0;
+    }
+  
+
+  
 }
 
 // mark a PTE invalid for user access.
@@ -369,6 +419,7 @@ copyout(pagetable_t pagetable, uint64 dstva, char *src, uint64 len)
 
   while(len > 0){
     va0 = PGROUNDDOWN(dstva);
+    uvmcow(pagetable, va0);
     pa0 = walkaddr(pagetable, va0);
     if(pa0 == 0)
       return -1;
