@@ -77,8 +77,51 @@ usertrap(void)
     exit(-1);
 
   // give up the CPU if this is a timer interrupt.
-  if(which_dev == 2)
+  if(which_dev == 2){
+    if(p->alarm_interval >= 0 && (p->handler_on == 0)) {
+      if(++p->tick_count >= p->alarm_interval){
+        p->handler_on = 1;
+
+        p->alarmcontext.epc = p->tf->epc;
+        p->alarmcontext.ra = p->tf->ra;
+        p->alarmcontext.sp = p->tf->sp;
+        p->alarmcontext.gp = p->tf->gp;
+        p->alarmcontext.tp = p->tf->tp;
+        p->alarmcontext.t0 = p->tf->t0;
+        p->alarmcontext.t1 = p->tf->t1;
+        p->alarmcontext.t2 = p->tf->t2;
+        p->alarmcontext.s0 = p->tf->s0;
+        p->alarmcontext.s1 = p->tf->s1;
+        p->alarmcontext.a0 = p->tf->a0;
+        p->alarmcontext.a1 = p->tf->a1;
+        p->alarmcontext.a2 = p->tf->a2;
+        p->alarmcontext.a3 = p->tf->a3;
+        p->alarmcontext.a4 = p->tf->a4;
+        p->alarmcontext.a5 = p->tf->a5;
+        p->alarmcontext.a6 = p->tf->a6;
+        p->alarmcontext.a7 = p->tf->a7;
+        p->alarmcontext.s2 = p->tf->s2;
+        p->alarmcontext.s3 = p->tf->s3;
+        p->alarmcontext.s4 = p->tf->s4;
+        p->alarmcontext.s5 = p->tf->s5;
+        p->alarmcontext.s6 = p->tf->s6;
+        p->alarmcontext.s7 = p->tf->s7;
+        p->alarmcontext.s8 = p->tf->s8;
+        p->alarmcontext.s9 = p->tf->s9;
+        p->alarmcontext.s10 = p->tf->s10;
+        p->alarmcontext.s11 = p->tf->s11;
+        p->alarmcontext.t3 = p->tf->t3;
+        p->alarmcontext.t4 = p->tf->t4;
+        p->alarmcontext.t5 = p->tf->t5;
+        p->alarmcontext.t6 = p->tf->t6;
+ 
+        p->tf->epc = p->handler;
+        p->tick_count = -1;
+      }
+    }
     yield();
+
+  }
 
   usertrapret();
 }
