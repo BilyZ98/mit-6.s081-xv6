@@ -250,6 +250,7 @@ create(char *path, short type, short major, short minor)
   ilock(dp);
 
   if((ip = dirlookup(dp, name, 0)) != 0){
+    printf("check dir\n");
     iunlockput(dp);
     ilock(ip);
     if(type == T_FILE && (ip->type == T_FILE || ip->type == T_DEVICE))

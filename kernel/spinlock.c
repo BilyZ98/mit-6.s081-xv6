@@ -155,6 +155,7 @@ sys_ntas(void)
   for(int i = 0; i < NLOCK; i++) {
     if(locks[i] == 0)
       break;
+    //printf("%s\n", locks[i]->name);
     if(strncmp(locks[i]->name, "bcache", strlen("bcache")) == 0 ||
        strncmp(locks[i]->name, "kmem", strlen("kmem")) == 0) {
       tot += locks[i]->nts;
