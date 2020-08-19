@@ -5,6 +5,20 @@
 #include "riscv.h"
 #include "defs.h"
 #include "fs.h"
+#include "spinlock.h"
+#include "sleeplock.h"
+#include "mmap.h"
+#include "proc.h"
+#include "fcntl.h"
+#include "file.h"
+
+struct {
+  struct spinlock lock;
+  struct VMA VMA_arr[NUM_VNA];
+} VM_Protected;
+
+
+//#include "file.h"
 
 /*
  * the kernel's page table.
@@ -16,6 +30,9 @@ extern char etext[];  // kernel.ld sets this to end of kernel code.
 extern char trampoline[]; // trampoline.S
 
 void print(pagetable_t);
+
+
+void VMA_init();
 
 /*
  * create a direct-map page table for the kernel and
@@ -52,6 +69,8 @@ kvminit()
   // map the trampoline for trap entry/exit to
   // the highest virtual address in the kernel.
   kvmmap(TRAMPOLINE, (uint64)trampoline, PGSIZE, PTE_R | PTE_X);
+
+  VMA_init();
 }
 
 // Switch h/w page table register to the kernel's page table,
@@ -191,11 +210,11 @@ uvmunmap(pagetable_t pagetable, uint64 va, uint64 size, int do_free)
       panic("uvmunmap: walk");
     if((*pte & PTE_V) == 0){
       printf("va=%p pte=%p\n", a, *pte);
-      panic("uvmunmap: not mapped");
+      //panic("uvmunmap: not mapped");
     }
     if(PTE_FLAGS(*pte) == PTE_V)
       panic("uvmunmap: not a leaf");
-    if(do_free){
+    if(do_free && (*pte & PTE_V)){
       pa = PTE2PA(*pte);
       kfree((void*)pa);
     }
@@ -328,7 +347,8 @@ uvmcopy(pagetable_t old, pagetable_t new, uint64 sz)
     if((pte = walk(old, i, 0)) == 0)
       panic("uvmcopy: pte should exist");
     if((*pte & PTE_V) == 0)
-      panic("uvmcopy: page not present");
+      continue;
+      //panic("uvmcopy: page not present");
     pa = PTE2PA(*pte);
     flags = PTE_FLAGS(*pte);
     if((mem = kalloc()) == 0)
@@ -450,4 +470,210 @@ copyinstr(pagetable_t pagetable, char *dst, uint64 srcva, uint64 max)
   } else {
     return -1;
   }
+}
+
+//
+struct VMA *allocate_vma_copy(struct VMA* vma, int new_pid){
+  //struct proc *p = myproc();
+
+  // allocate a VMA
+  acquire(&VM_Protected.lock);
+  
+  for(int i=0; i < NUM_VNA; i++) {
+    if(VM_Protected.VMA_arr[i].pid == -1){
+      VM_Protected.VMA_arr[i].f = vma->f;
+      VM_Protected.VMA_arr[i].pid = new_pid;
+      VM_Protected.VMA_arr[i].permission = vma->permission;
+      VM_Protected.VMA_arr[i].flags = vma->flags;
+      VM_Protected.VMA_arr[i].offset = vma->offset;
+      VM_Protected.VMA_arr[i].read_offset = vma->read_offset;
+      VM_Protected.VMA_arr[i].write_offset = vma->write_offset;
+      VM_Protected.VMA_arr[i].length = vma->length;
+      VM_Protected.VMA_arr[i].addr = vma->addr;
+      VM_Protected.VMA_arr[i].unmapped_size = vma->unmapped_size;
+
+      //VM_Protected.VMA_arr[i].next = p->vma;
+      //p->vma = &VM_Protected.VMA_arr[i];
+
+      filedup(vma->f);
+      release(&VM_Protected.lock);
+      return &VM_Protected.VMA_arr[i];
+    }
+  }
+  // can't find a usable VMA
+  release(&VM_Protected.lock);
+  return 0;
+}
+
+uint64 do_mmap(uint64 addr, int length, int prot, int flags, int fd, int offset){
+
+  if(length < 0) return -1;
+  struct proc *p = myproc();
+  if(!(p->ofile[fd]->writable) && prot & PROT_WRITE) {
+    if(flags & MAP_SHARED) return -1;
+  }
+  uint64 sz = p->sz;
+  p->sz += length;
+   
+  // allocate a VMA
+  acquire(&VM_Protected.lock);
+  
+  for(int i=0; i < NUM_VNA; i++) {
+    if(VM_Protected.VMA_arr[i].pid == -1){
+      VM_Protected.VMA_arr[i].f = p->ofile[fd];
+      VM_Protected.VMA_arr[i].pid = p->pid;
+      VM_Protected.VMA_arr[i].permission = prot;
+      VM_Protected.VMA_arr[i].flags = flags;
+      VM_Protected.VMA_arr[i].offset = offset;
+      VM_Protected.VMA_arr[i].read_offset = offset;
+      VM_Protected.VMA_arr[i].write_offset = 0;
+      VM_Protected.VMA_arr[i].length = length;
+      VM_Protected.VMA_arr[i].addr = sz;
+
+      VM_Protected.VMA_arr[i].next = p->vma;
+      p->vma = &VM_Protected.VMA_arr[i];
+
+      filedup(p->ofile[fd]);
+      release(&VM_Protected.lock);
+      return sz;
+    }
+  }
+  // can't find a usable VMA
+  release(&VM_Protected.lock);
+  return -1;
+}
+int do_munmap(uint64 addr, int length){
+  // get vma
+  struct proc *p = myproc();
+  struct VMA *vma = p->vma;
+  struct VMA *vma_pre = p->vma;
+  struct file *f = 0;
+  int first = 1;
+  for(; vma; vma = vma_pre->next){
+    if(addr >= vma->addr && addr < vma->addr + vma->length){
+      f = vma->f;
+      break;
+    }
+    if(first){
+      first = 0;
+    } else {
+      vma_pre = vma_pre->next;
+    }
+  }
+  if(!f) {
+    panic("can't find vma\n");
+  }
+
+  vma->unmapped_size += length;
+
+  //check permission 
+  int n = length;
+  int r = 0;
+  int ret = 0;
+  //check if MAP_SHREAD
+  if(vma->flags & MAP_SHARED) {
+    //write back to file
+    int max = ((MAXOPBLOCKS-1-1-2) / 2) * BSIZE;
+    int i = 0;
+    while(i < n){
+      int n1 = n - i;
+      if(n1 > max)
+        n1 = max;
+      uint64 pa = walkaddr(p->pagetable, addr+i);
+      uint64 va_round_down = PGROUNDDOWN(addr+i);
+      // how much space left in a page from starting address
+      uint64 page_space_left = PGSIZE - (addr + i - va_round_down);
+
+      // the user haven't read this part of the file
+      // we don't need to write back to file, just skip this page
+      if(pa == 0) {
+        i += page_space_left;
+        continue;
+      } 
+      
+      if(page_space_left < n1) n1 = page_space_left;
+      begin_op(f->ip->dev);
+      ilock(f->ip);
+      if ((r = writei(f->ip, 1, addr + i, vma->offset + addr + i - vma->addr, n1)) > 0){
+        //vma->write_offset += r;
+        //f->off += r;
+      }
+
+      iunlock(f->ip);
+      end_op(f->ip->dev);
+
+      if(r < 0)
+        break;
+      if(r != n1)
+        panic("short filewrite");
+      i += r;
+    }
+    ret = (i == n ? n : -1);
+
+    return ret;
+  }
+
+  // uvmunmap
+  uvmunmap(p->pagetable, addr, length, 1);
+
+  // we need to remove vma from the process 
+  if(vma->unmapped_size >= vma->length) {
+    fileclose(vma->f);
+    vma->pid = -1;
+    vma->unmapped_size = 0;
+    vma->offset = 0;
+    vma->read_offset = 0;
+    vma->write_offset = 0;
+    if(vma_pre == vma) {
+      p->vma = 0;
+    }else {
+      vma_pre->next = vma->next;
+    }
+  }
+  //printf("unmap");
+  return ret;
+}
+
+void VMA_init(){
+  initlock(&VM_Protected.lock, "VMAlock");
+  for(int i=0; i < NUM_VNA; i++) {
+    VM_Protected.VMA_arr[i].pid = -1;
+    VM_Protected.VMA_arr[i].next = 0;
+    VM_Protected.VMA_arr[i].unmapped_size = 0;
+    VM_Protected.VMA_arr[i]. read_offset= 0;
+    VM_Protected.VMA_arr[i]. write_offset= 0;
+    VM_Protected.VMA_arr[i].offset = 0;
+
+
+  }
+}
+
+// should we check if we have mapped the file?
+// assume the fd is legal
+uint64
+sys_mmap(void){
+  uint64 addr;
+  int length;
+  int prot; // PROT_READ or PROT_WRITE or both
+  int flags; // MAP_SHARED or MAP_PRIVATE
+  int fd;
+  int offset;
+
+  if(argaddr(0, &addr) < 0 || argint(1, &length) < 0 || argint(2, &prot) < 0 || 
+      argint(3, &flags) < 0 || argint(4, &fd) < 0 ||argint(5, &offset) < 0) {
+        return -1;
+  } 
+
+  return do_mmap(addr, length, prot, flags, fd, offset);
+}
+
+uint64
+sys_munmap(void){
+  uint64 addr;
+  int length;
+  if(argaddr(0, &addr) < 0 || argint(1, &length) < 0) {
+    return -1;
+  }
+
+  return do_munmap(addr, length);
 }

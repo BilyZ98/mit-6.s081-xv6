@@ -5,6 +5,7 @@
 #include "spinlock.h"
 #include "sleeplock.h"
 #include "fs.h"
+#include "mmap.h"
 #include "file.h"
 #include "proc.h"
 #include "defs.h"
@@ -41,6 +42,8 @@ procinit(void)
       uint64 va = KSTACK((int) (p - proc));
       kvmmap(va, (uint64)pa, PGSIZE, PTE_R | PTE_W);
       p->kstack = va;
+
+      p->vma = 0;
   }
   kvminithart();
 }
@@ -271,11 +274,25 @@ fork(void)
   // Cause fork to return 0 in the child.
   np->tf->a0 = 0;
 
+
+
   // increment reference counts on open file descriptors.
   for(i = 0; i < NOFILE; i++)
     if(p->ofile[i])
       np->ofile[i] = filedup(p->ofile[i]);
   np->cwd = idup(p->cwd);
+
+  // allocate new vma for child proc
+  // and copy vmas of parent proc
+  // increase ref count of file of vma 
+  np->vma = 0;
+  struct VMA *vma = p->vma;
+  for(; vma; vma = vma->next){
+    struct VMA *v = allocate_vma_copy(vma, np->pid);
+    v->next = np->vma;
+    np->vma = v;
+    //do_mmap(vma->)
+  }
 
   safestrcpy(np->name, p->name, sizeof(p->name));
 
@@ -324,6 +341,21 @@ exit(int status)
 
   if(p == initproc)
     panic("init exiting");
+  
+  struct VMA *vma = p->vma;
+  for(; vma; vma = p->vma) {
+    //call munmap
+    do_munmap(vma->addr, vma->length);
+    // clear vma
+    vma->pid = -1;
+    vma->offset = 0;
+    vma->read_offset = 0;
+    vma->write_offset = 0;
+    vma->unmapped_size = 0;
+
+    // remove vma from process's vma list 
+    p->vma = vma->next;
+  }
 
   // Close all open files.
   for(int fd = 0; fd < NOFILE; fd++){

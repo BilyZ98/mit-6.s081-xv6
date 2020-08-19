@@ -123,6 +123,7 @@ mmap_test(void)
     err("mmap (2)");
   if (close(fd) == -1)
     err("close");
+  printf("sec v1\n");
   _v1(p);
   for (i = 0; i < PGSIZE*2; i++)
     p[i] = 'Z';
@@ -148,7 +149,7 @@ mmap_test(void)
     err("mmap (3)");
   if (close(fd) == -1)
     err("close");
-
+  printf("third v1\n");
   // check that the mapping still works after close(fd).
   _v1(p);
 
@@ -159,7 +160,7 @@ mmap_test(void)
   // unmap just the first two of three pages of mapped memory.
   if (munmap(p, PGSIZE*2) == -1)
     err("munmap (3)");
-
+  printf("unmmap 3\n");
   // check that the writes to the mapped memory were
   // written to the file.
   if ((fd = open(f, O_RDWR)) == -1)
@@ -177,7 +178,7 @@ mmap_test(void)
   // unmap the rest of the mapped memory.
   if (munmap(p+PGSIZE*2, PGSIZE) == -1)
     err("munmap (4)");
-
+  printf("unmap 4\n");
   //
   // mmap two files at the same time.
   //
@@ -209,6 +210,7 @@ mmap_test(void)
     err("mmap2 mismatch");
 
   munmap(p1, PGSIZE);
+  printf("unmap 1 succeed\n");
   if(memcmp(p2, "67890", 5) != 0)
     err("mmap2 mismatch (2)");
   munmap(p2, PGSIZE);

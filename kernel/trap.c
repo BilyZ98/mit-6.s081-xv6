@@ -2,9 +2,17 @@
 #include "param.h"
 #include "memlayout.h"
 #include "riscv.h"
+#include "fcntl.h"
 #include "spinlock.h"
 #include "proc.h"
 #include "defs.h"
+#include "mmap.h"
+#include "sleeplock.h"
+#include "fs.h"
+#include "file.h"
+
+
+
 
 struct spinlock tickslock;
 uint ticks;
@@ -70,12 +78,66 @@ usertrap(void)
     syscall();
   } else if((which_dev = devintr()) != 0){
     // ok
+  } else if(r_scause() == 13 || r_scause() == 15) {
+    
+    uint64 va = r_stval();
+    char *mem;
+    if(va < p->tf->sp){
+      printf("stack error\n");
+      p->killed = 1;
+    }
+    // get file 
+    struct VMA *vma = p->vma;
+    struct file *f = 0;
+    while(vma) {
+      if(va >= vma->addr && va <vma->addr + vma->length){
+        f = vma->f;
+        break;
+      }
+      vma = vma->next;
+    }
+    if(!f) {
+      p->killed = 1;
+      goto bad;
+      //panic("don't find the vma\n");
+    }
+    mem = kalloc();
+    if(mem == 0) {
+      printf("not enough memory\n");
+      p->killed = 1;
+    }
+    memset(mem, 0, PGSIZE);
+    int r = 0;
+    ilock(f->ip);
+    if((r = readi(f->ip, 0, (uint64)mem, vma->offset + va - vma->addr, PGSIZE)) > 0){
+      //vma->read_offset += r;
+      //f->off += r;
+    }
+
+    iunlock(f->ip);
+
+    va = PGROUNDDOWN(va);
+    int permission = vma->permission;
+    int write = 0;
+    int read = 0;
+    if(permission & PROT_READ) {
+      read = PTE_R;
+    }
+    if(permission & PROT_WRITE) {
+      write = PTE_W;
+    }
+    if(mappages(p->pagetable, va, PGSIZE, (uint64)mem,  read | write |PTE_U) != 0){
+      kfree(mem);
+      p->killed = 1;
+    }
+    
   } else {
     printf("usertrap(): unexpected scause %p (%s) pid=%d\n", r_scause(), scause_desc(r_scause()), p->pid);
     printf("            sepc=%p stval=%p\n", r_sepc(), r_stval());
     p->killed = 1;
   }
 
+bad:
   if(p->killed)
     exit(-1);
 

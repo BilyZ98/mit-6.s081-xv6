@@ -171,6 +171,13 @@ uint64          walkaddr(pagetable_t, uint64);
 int             copyout(pagetable_t, uint64, char *, uint64);
 int             copyin(pagetable_t, char *, uint64, uint64);
 int             copyinstr(pagetable_t, char *, uint64, uint64);
+//void            *mmap(void *, int, int, int, int, int);
+//int             munmap(void *, int);
+uint64          sys_mmap(void);
+uint64          sys_munmap(void);
+int             do_munmap(uint64 addr, int length);
+uint64          do_mmap(uint64 addr, int length, int prot, int flas, int fd, int offset);
+struct VMA      *allocate_vma_copy(struct VMA *, int new_pid);
 
 // plic.c
 void            plicinit(void);

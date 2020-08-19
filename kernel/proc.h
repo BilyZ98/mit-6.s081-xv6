@@ -1,3 +1,6 @@
+#ifndef PROC_H
+#define PROC_H
+
 // Saved registers for kernel context switches.
 struct context {
   uint64 ra;
@@ -94,6 +97,8 @@ struct proc {
   int xstate;                  // Exit status to be returned to parent's wait
   int pid;                     // Process ID
 
+  struct VMA  *vma;           //virtual memory area
+
   // these are private to the process, so p->lock need not be held.
   uint64 kstack;               // Virtual address of kernel stack
   uint64 sz;                   // Size of process memory (bytes)
@@ -104,3 +109,5 @@ struct proc {
   struct inode *cwd;           // Current directory
   char name[16];               // Process name (debugging)
 };
+
+#endif
