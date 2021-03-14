@@ -267,7 +267,7 @@ iappend(uint inum, void *xp, int n)
   uint fbn, off, n1;
   struct dinode din;
   char buf[BSIZE];
-  uint indirect[NINDIRECT];
+  uint indirect[NINDIRECT1];
   uint x;
 
   rinode(inum, &din);
@@ -290,7 +290,7 @@ iappend(uint inum, void *xp, int n)
         indirect[fbn - NDIRECT] = xint(freeblock++);
         wsect(xint(din.addrs[NDIRECT]), (char*)indirect);
       }
-      x = xint(indirect[fbn-NDIRECT]);
+      x = xint(indirect[fbn-NDIRECT]); 
     }
     n1 = min(n, (fbn + 1) * BSIZE - off);
     rsect(x, buf);
