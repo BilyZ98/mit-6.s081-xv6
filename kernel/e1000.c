@@ -20,7 +20,7 @@ static struct mbuf *rx_mbufs[RX_RING_SIZE];
 static volatile uint32 *regs;
 
 struct spinlock e1000_lock;
-
+struct spinlock e1000_receive_lock;
 // called by pci_init().
 // xregs is the memory address at which the
 // e1000's registers are mapped.
@@ -30,6 +30,7 @@ e1000_init(uint32 *xregs)
   int i;
 
   initlock(&e1000_lock, "e1000");
+  initlock(&e1000_receive_lock, "e1000_receive");
 
   regs = xregs;
 
@@ -97,12 +98,36 @@ e1000_transmit(struct mbuf *m)
 {
   //
   // Your code here.
-  //
+  printf("transmit content\n");
+  printf("buf content: %s\n", m->buf);
   // the mbuf contains an ethernet frame; program it into
   // the TX descriptor ring so that the e1000 sends it. Stash
   // a pointer so that it can be freed after sending.
-  //
-  return -1;
+  acquire(&e1000_lock);
+
+  uint32 tx_ring_pos = regs[E1000_TDT];
+  if((tx_ring[tx_ring_pos].status & E1000_RXD_STAT_DD) == 0){
+    printf("tx dd not done, return");
+    release(&e1000_lock);
+    return -1;
+  }
+  // maybe should check if buf pointer is null
+  if(tx_mbufs[tx_ring_pos]){
+    mbuffree(tx_mbufs[tx_ring_pos]);
+    tx_mbufs[tx_ring_pos] = 0;
+  }
+  //mbuffree(tx_mbufs[tx_ring_pos]);
+  tx_mbufs[tx_ring_pos] = m;
+  tx_ring[tx_ring_pos].addr = (uint64)m->head;
+  tx_ring[tx_ring_pos].length = m->len;
+  tx_ring[tx_ring_pos].cmd |= E1000_TXD_CMD_RS;
+  tx_ring[tx_ring_pos].cmd |= E1000_TXD_CMD_EOP;
+  // regs[E1000_TDT] = (regs[E1000_TDT] + 1) % TX_RING_SIZE;
+  //uint64 payload_ptr = (uint64)m;
+  tx_ring[tx_ring_pos].status = 0;
+  regs[E1000_TDT] = (tx_ring_pos + 1) % TX_RING_SIZE;
+  release(&e1000_lock);
+  return 0;
 }
 
 static void
@@ -114,14 +139,45 @@ e1000_recv(void)
   // Check for packets that have arrived from the e1000
   // Create and deliver an mbuf for each packet (using net_rx()).
   //
+  //acquire(&e1000_lock);
+  uint32 ring_pos = (regs[E1000_RDT] + 1) % RX_RING_SIZE;
+  
+  // because the rate of recieving packets may be faster
+  // then the rate of the interrupt
+  // so there may be on interrupt for multiple 
+  // recieving packets, if we don't use a while loop
+  // we may lost some packets for one interrup. 
+  while((rx_ring[ring_pos].status & E1000_RXD_STAT_DD)) {
+    printf("recieve packet on ring_pos:%d\n", ring_pos);
+    // printf("descriptor not done, return\n");
+    // //release(&e1000_lock);
+    // return;
+    
+    mbufput(rx_mbufs[ring_pos], rx_ring[ring_pos].length);
+    // rx_mbufs[ring_pos]->len = rx_ring[ring_pos].length;
+    net_rx(rx_mbufs[ring_pos]);
+    // rx_mbufs[ring_pos] = mbufalloc(MBUF_DEFAULT_HEADROOM);
+    rx_mbufs[ring_pos] = mbufalloc(0);
+    if(!rx_mbufs[ring_pos]) {
+      panic("rx alloc mbuf failed");
+    }
+    rx_ring[ring_pos].addr = (uint64)rx_mbufs[ring_pos]->head;
+    rx_ring[ring_pos].length = 0; //rx_mbufs[ring_pos]->len;
+    rx_ring[ring_pos].status = 0;
+    regs[E1000_RDT] = ring_pos;
+    ring_pos = (ring_pos + 1) % RX_RING_SIZE;
+  }
+  //rx_mbufs[ring_pos]->len = mbufput()
+  //release(&e1000_lock);
 }
 
 void
 e1000_intr(void)
 {
-  e1000_recv();
   // tell the e1000 we've seen this interrupt;
   // without this the e1000 won't raise any
   // further interrupts.
-  regs[E1000_ICR];
+  regs[E1000_ICR] = 0xffffffff;
+
+  e1000_recv();
 }

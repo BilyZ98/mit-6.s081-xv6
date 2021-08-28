@@ -8,6 +8,7 @@ sock.bind(addr)
 
 while True:
     buf, raddr = sock.recvfrom(4096)
+    print buf
     print >>sys.stderr, buf
     if buf:
         sent = sock.sendto(buf, raddr)

@@ -25,6 +25,7 @@ ping(uint16 sport, uint16 dport, int attempts)
     fprintf(2, "ping: connect() failed\n");
     exit(1);
   }
+  printf("connect succeeded\n");
 
   for(int i = 0; i < attempts; i++) {
     if(write(fd, obuf, sizeof(obuf)) < 0){
@@ -32,6 +33,7 @@ ping(uint16 sport, uint16 dport, int attempts)
       exit(1);
     }
   }
+  printf("send succeeded\n");
 
   char ibuf[128];
   int cc = read(fd, ibuf, sizeof(ibuf));
@@ -39,7 +41,7 @@ ping(uint16 sport, uint16 dport, int attempts)
     fprintf(2, "ping: recv() failed\n");
     exit(1);
   }
-
+  printf("read succeeded\n");
   close(fd);
   if (strcmp(obuf, ibuf) || cc != sizeof(obuf)){
     fprintf(2, "ping didn't receive correct payload\n");
@@ -228,14 +230,14 @@ main(int argc, char *argv[])
 
   printf("nettests running on port %d\n", dport);
 
-  printf("testing one ping: ");
-  ping(2000, dport, 2);
-  printf("OK\n");
+  // printf("testing one ping: ");
+  // ping(2000, dport, 2);
+  // printf("OK\n");
 
-  printf("testing single-process pings: ");
-  for (i = 0; i < 100; i++)
-    ping(2000, dport, 1);
-  printf("OK\n");
+  // printf("testing single-process pings: ");
+  // for (i = 0; i < 100; i++)
+  //   ping(2000, dport, 1);
+  // printf("OK\n");
 
   printf("testing multi-process pings: ");
   for (i = 0; i < 10; i++){
