@@ -19,6 +19,7 @@ plese refer to course website for assgnment detail and related resources
 - [x] lock
 - [ ] File system
 - [x] mmap
+- [x] net
 
 
 xv6 is a re-implementation of Dennis Ritchie's and Ken Thompson's Unix
